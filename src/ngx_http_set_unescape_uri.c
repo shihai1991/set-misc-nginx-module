@@ -1,18 +1,21 @@
+#ifndef DDEBUG
 #define DDEBUG 0
+#endif
 #include "ddebug.h"
+
 #include <ndk.h>
 #include "ngx_http_set_unescape_uri.h"
 
 #define NGX_UNESCAPE_URI_COMPONENT  0
 
 
-static void ngx_unescape_uri_patched(u_char **dst, u_char **src,
-        size_t size, ngx_uint_t type);
+static void ngx_unescape_uri_patched(u_char **dst, u_char **src, size_t size,
+    ngx_uint_t type);
 
 
 ngx_int_t
-ngx_http_set_misc_unescape_uri(ngx_http_request_t *r,
-        ngx_str_t *res, ngx_http_variable_value_t *v)
+ngx_http_set_misc_unescape_uri(ngx_http_request_t *r, ngx_str_t *res,
+    ngx_http_variable_value_t *v)
 {
     size_t                   len;
     u_char                  *p;
@@ -32,7 +35,7 @@ ngx_http_set_misc_unescape_uri(ngx_http_request_t *r,
 
     if (src != v->data + v->len) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "set_unescape_uri: input data not consumed completely");
+                      "set_unescape_uri: input data not consumed completely");
         return NGX_ERROR;
     }
 
@@ -46,7 +49,7 @@ ngx_http_set_misc_unescape_uri(ngx_http_request_t *r,
 /* XXX we also decode '+' to ' ' */
 static void
 ngx_unescape_uri_patched(u_char **dst, u_char **src, size_t size,
-        ngx_uint_t type)
+    ngx_uint_t type)
 {
     u_char  *d, *s, ch, c, decoded;
     enum {

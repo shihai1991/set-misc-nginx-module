@@ -8,6 +8,7 @@ use Test::Nginx::Socket;
 plan tests => repeat_each() * 2 * blocks();
 
 no_long_string();
+
 #master_on();
 #log_level("warn");
 
@@ -67,4 +68,3 @@ sun
 moon
 earth
 earth
-

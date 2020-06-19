@@ -1,16 +1,23 @@
+#ifndef DDEBUG
 #define DDEBUG 0
-
+#endif
 #include "ddebug.h"
+
 #include <ndk.h>
 #include "ngx_http_set_quote_sql.h"
 
 
+static ngx_int_t ngx_http_pg_utf_escape(ngx_http_request_t *r, ngx_str_t *res);
+static ngx_int_t ngx_http_pg_utf_islegal(const unsigned char *s, ngx_int_t len);
+static ngx_int_t ngx_http_pg_utf_mblen(const unsigned char *s);
+
+
 ngx_int_t
-ngx_http_set_misc_quote_pgsql_str(ngx_http_request_t *r,
-        ngx_str_t *res, ngx_http_variable_value_t *v)
+ngx_http_set_misc_quote_pgsql_str(ngx_http_request_t *r, ngx_str_t *res,
+    ngx_http_variable_value_t *v)
 {
     u_char                   *pstr;
-    ngx_int_t               length;
+    ngx_int_t                 length;
 
     if (v->not_found || v->len ==0) {
         res->data = (u_char *) "''";
@@ -20,22 +27,30 @@ ngx_http_set_misc_quote_pgsql_str(ngx_http_request_t *r,
 
     ngx_http_set_misc_quote_sql_str(r, res, v);
     length  = res->len;
+
     pstr    = ngx_palloc(r->pool, length + 1);
+    if (pstr == NULL) {
+        return NGX_ERROR;
+    }
+
     *pstr   = 'E';
     memcpy(pstr + 1, res->data, length);
     res->data   = pstr;
     res->len    = length + 1;
 
     if (ngx_http_pg_utf_islegal(res->data, res->len)) {
-       return NGX_OK;
+        return NGX_OK;
     }
 
-    res = ngx_http_pg_utf_escape(r, res);
+    if (ngx_http_pg_utf_escape(r, res) != NGX_OK) {
+        return NGX_ERROR;
+    }
+
     return NGX_OK;
 }
 
 
-ngx_int_t
+static ngx_int_t
 ngx_http_pg_utf_mblen(const unsigned char *s)
 {
     int len;
@@ -60,7 +75,7 @@ ngx_http_pg_utf_mblen(const unsigned char *s)
 }
 
 
-ngx_int_t
+static ngx_int_t
 ngx_http_pg_utf_islegal(const unsigned char *s, ngx_int_t len)
 {
     ngx_int_t               mblen;
@@ -71,74 +86,106 @@ ngx_http_pg_utf_islegal(const unsigned char *s, ngx_int_t len)
 
     while (slen > 0) {
         mblen = ngx_http_pg_utf_mblen(s);
-        if (slen < mblen)
+        if (slen < mblen) {
             return 0;
-
-        switch(mblen)
-        {
-            default:
-                return 0;
-            case 4:
-                a = *(s + 3);
-                if (a < 0x80 || a > 0xBF)
-                    return 0;
-            case 3:
-                a = *(s + 2);
-                if (a < 0x80 || a > 0xBF)
-                    return 0;
-            case 2:
-                a = *(s + 1);
-                switch (*s)
-                {
-                    case 0xE0:
-                        if (a < 0xA0 || a > 0xBF)
-                            return 0;
-                        break;
-                    case 0xED:
-                        if (a < 0x80 || a > 0x9F)
-                            return 0;
-                        break;
-                    case 0xF0:
-                        if (a < 0x90 || a > 0xBF)
-                            return 0;
-                        break;
-                    case 0xF4:
-                        if (a < 0x80 || a > 0x8F)
-                            return 0;
-                        break;
-                    default:
-                        if (a < 0x80 || a > 0xBF)
-                            return 0;
-                        break;
-                }
-            case 1:
-                a = *s;
-                if (a >= 0x80 && a < 0xC2)
-                    return 0;
-                if (a > 0xF4)
-                    return 0;
-                break;
         }
 
-        s       += mblen;
-        slen    -= mblen;
+        switch (mblen) {
+
+        case 4:
+            a = *(s + 3);
+            if (a < 0x80 || a > 0xBF) {
+                return 0;
+            }
+
+            break;
+
+        case 3:
+            a = *(s + 2);
+            if (a < 0x80 || a > 0xBF) {
+                return 0;
+            }
+
+            break;
+
+        case 2:
+            a = *(s + 1);
+
+            switch (*s) {
+
+            case 0xE0:
+                if (a < 0xA0 || a > 0xBF) {
+                    return 0;
+                }
+
+                break;
+
+            case 0xED:
+                if (a < 0x80 || a > 0x9F) {
+                    return 0;
+                }
+
+                break;
+
+            case 0xF0:
+                if (a < 0x90 || a > 0xBF) {
+                    return 0;
+                }
+
+                break;
+
+            case 0xF4:
+                if (a < 0x80 || a > 0x8F) {
+                    return 0;
+                }
+
+                break;
+
+            default:
+                if (a < 0x80 || a > 0xBF) {
+                    return 0;
+                }
+
+                break;
+            }
+
+            break;
+
+        case 1:
+            a = *s;
+            if (a >= 0x80 && a < 0xC2) {
+                return 0;
+            }
+
+            if (a > 0xF4) {
+                return 0;
+            }
+
+            break;
+
+        default:
+            return 0;
+        }
+
+        s += mblen;
+        slen -= mblen;
     }
 
     return 1;
 }
 
 
-ngx_str_t *
+static ngx_int_t
 ngx_http_pg_utf_escape(ngx_http_request_t *r, ngx_str_t *res)
 {
     ngx_str_t               *result;
     ngx_int_t                l, count;
     u_char                  *d, *p, *p1;
 
-    l           = res->len;
-    d           = res->data;
-    result      = res;
-    count       = 0;
+    l      = res->len;
+    d      = res->data;
+    result = res;
+    count  = 0;
 
     while (l-- > 0) {
         if (*d & 0x80) {
@@ -148,12 +195,12 @@ ngx_http_pg_utf_escape(ngx_http_request_t *r, ngx_str_t *res)
         count++;
     }
 
-    d   = res->data;
-    l   = res->len;
+    d = res->data;
+    l = res->len;
 
-    p   = ngx_palloc(r->pool, count);
+    p = ngx_palloc(r->pool, count);
     if (p == NULL) {
-        return result;
+        return NGX_ERROR;
     }
 
     p1  = p;
@@ -170,16 +217,16 @@ ngx_http_pg_utf_escape(ngx_http_request_t *r, ngx_str_t *res)
         d++;
     }
 
-    result->len     = count;
-    result->data    = p1;
+    result->len  = count;
+    result->data = p1;
 
-    return result;
+    return NGX_OK;
 }
 
 
 ngx_int_t
-ngx_http_set_misc_quote_sql_str(ngx_http_request_t *r,
-        ngx_str_t *res, ngx_http_variable_value_t *v)
+ngx_http_set_misc_quote_sql_str(ngx_http_request_t *r, ngx_str_t *res,
+    ngx_http_variable_value_t *v)
 {
     size_t                   len;
     u_char                  *p;
@@ -207,6 +254,7 @@ ngx_http_set_misc_quote_sql_str(ngx_http_request_t *r,
 
     if (escape == 0) {
         p = ngx_copy(p, v->data, v->len);
+
     } else {
         p = (u_char *) ngx_http_set_misc_escape_sql_str(p, v->data, v->len);
     }
@@ -215,7 +263,7 @@ ngx_http_set_misc_quote_sql_str(ngx_http_request_t *r,
 
     if (p != res->data + res->len) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "set_quote_sql_str: buffer error");
+                      "set_quote_sql_str: buffer error");
         return NGX_ERROR;
     }
 
@@ -224,8 +272,7 @@ ngx_http_set_misc_quote_sql_str(ngx_http_request_t *r,
 
 
 uintptr_t
-ngx_http_set_misc_escape_sql_str(u_char *dst, u_char *src,
-        size_t size)
+ngx_http_set_misc_escape_sql_str(u_char *dst, u_char *src, size_t size)
 {
     ngx_uint_t               n;
 
@@ -237,12 +284,16 @@ ngx_http_set_misc_escape_sql_str(u_char *dst, u_char *src,
              * is always 1 */
             if ((*src & 0x80) == 0) {
                 switch (*src) {
-                    case '\r':
+                    case '\0':
+                    case '\b':
                     case '\n':
+                    case '\r':
+                    case '\t':
                     case '\\':
                     case '\'':
                     case '"':
-                    case '\032':
+                    case '$':
+                    case 26: /* \Z */
                         n++;
                         break;
                     default:
@@ -259,14 +310,29 @@ ngx_http_set_misc_escape_sql_str(u_char *dst, u_char *src,
     while (size) {
         if ((*src & 0x80) == 0) {
             switch (*src) {
-                case '\r':
+                case '\0':
                     *dst++ = '\\';
-                    *dst++ = 'r';
+                    *dst++ = '0';
+                    break;
+
+                case '\b':
+                    *dst++ = '\\';
+                    *dst++ = 'b';
                     break;
 
                 case '\n':
                     *dst++ = '\\';
                     *dst++ = 'n';
+                    break;
+
+                case '\r':
+                    *dst++ = '\\';
+                    *dst++ = 'r';
+                    break;
+
+                case '\t':
+                    *dst++ = '\\';
+                    *dst++ = 't';
                     break;
 
                 case '\\':
@@ -284,9 +350,14 @@ ngx_http_set_misc_escape_sql_str(u_char *dst, u_char *src,
                     *dst++ = '"';
                     break;
 
-                case '\032':
+                case '$':
                     *dst++ = '\\';
-                    *dst++ = *src;
+                    *dst++ = '$';
+                    break;
+
+                case 26:
+                    *dst++ = '\\';
+                    *dst++ = 'Z';
                     break;
 
                 default:

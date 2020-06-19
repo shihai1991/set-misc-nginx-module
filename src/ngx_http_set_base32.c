@@ -1,28 +1,40 @@
+#ifndef DDEBUG
 #define DDEBUG 0
+#endif
 #include "ddebug.h"
+
+
 #include <ndk.h>
+
 #include "ngx_http_set_base32.h"
+#include "ngx_http_set_misc_module.h"
 
 
 #define base32_encoded_length(len) ((((len)+4)/5)*8)
 #define base32_decoded_length(len) ((((len)+7)/8)*5)
 
 
-static void encode_base32(size_t slen, u_char *src, size_t *dlen, u_char *dst);
-static int decode_base32(size_t slen, u_char *src, size_t *dlen, u_char *dst);
+static void encode_base32(size_t slen, u_char *src, size_t *dlen, u_char *dst,
+    ngx_flag_t padding, ngx_str_t *alphabet);
+static int decode_base32(size_t slen, u_char *src, size_t *dlen, u_char *dst,
+    u_char *basis32);
 
 
 ngx_int_t
-ngx_http_set_misc_encode_base32(ngx_http_request_t *r,
-        ngx_str_t *res, ngx_http_variable_value_t *v)
+ngx_http_set_misc_encode_base32(ngx_http_request_t *r, ngx_str_t *res,
+    ngx_http_variable_value_t *v)
 {
     size_t                   len;
     u_char                  *p;
     u_char                  *src, *dst;
 
+    ngx_http_set_misc_loc_conf_t        *conf;
+
+    conf = ngx_http_get_module_loc_conf(r, ngx_http_set_misc_module);
+
     len = base32_encoded_length(v->len);
 
-    dd("estimated dst len: %d", len);
+    dd("estimated dst len: %d", (int) len);
 
     p = ngx_palloc(r->pool, len);
     if (p == NULL) {
@@ -31,29 +43,34 @@ ngx_http_set_misc_encode_base32(ngx_http_request_t *r,
 
     src = v->data; dst = p;
 
-    encode_base32(v->len, src, &len, dst);
+    encode_base32(v->len, src, &len, dst, conf->base32_padding,
+                  &conf->base32_alphabet);
 
     res->data = p;
     res->len = len;
 
-    dd("res (len %d): %.*s", res->len, res->len, res->data);
+    dd("res (len %d): %.*s", (int) res->len, (int) res->len, res->data);
 
     return NGX_OK;
 }
 
 
 ngx_int_t
-ngx_http_set_misc_decode_base32(ngx_http_request_t *r,
-        ngx_str_t *res, ngx_http_variable_value_t *v)
+ngx_http_set_misc_decode_base32(ngx_http_request_t *r, ngx_str_t *res,
+    ngx_http_variable_value_t *v)
 {
     size_t                   len;
     u_char                  *p;
     u_char                  *src, *dst;
     int                      ret;
 
+    ngx_http_set_misc_loc_conf_t        *conf;
+
+    conf = ngx_http_get_module_loc_conf(r, ngx_http_set_misc_module);
+
     len = base32_decoded_length(v->len);
 
-    dd("estimated dst len: %d", len);
+    dd("estimated dst len: %d", (int) len);
 
     p = ngx_palloc(r->pool, len);
     if (p == NULL) {
@@ -62,7 +79,7 @@ ngx_http_set_misc_decode_base32(ngx_http_request_t *r,
 
     src = v->data; dst = p;
 
-    ret = decode_base32(v->len, src, &len, dst);
+    ret = decode_base32(v->len, src, &len, dst, conf->basis32);
 
     if (ret == 0 /* OK */) {
         res->data = p;
@@ -80,35 +97,18 @@ ngx_http_set_misc_decode_base32(ngx_http_request_t *r,
 }
 
 
-/* 实现参考 src/core/ngx_string.c 中的 ngx_(encode|decode)_base64()
- * 例程 */
+/* See the implementation in src/core/ngx_string.c's
+ * ngx_(encode|decode)_base64() for details. */
 
-/**
- * 将给定字符串转换成对应的 Base32 编码形式.
- * 目标字符串必须保证有充足的空间容纳编码后的数据.
- * 可以用宏 base32_encoded_length() 预估编码后数据
- * 长度并预先为目标字符串分配空间.
- * <code>
- *     char *src, *dst;
- *     int slen, dlen;
- *     slen = sizeof("hello") - 1;
- *     src = (char*) "hello";
- *     dst = malloc(base32_encoded_length(slen));
- *     encode_base32(slen, src, &(dlen), dst);
- * </code>
- * @param slen 源数据串长度.
- * @param src 原数据串指针.
- * @param dlen 目标数据串长度指针, 保存 Base32 编码后数据长度.
- * @param dst 目标数据串指针, 保存 Base32 编码后数据.
- * */
 static void
-encode_base32(size_t slen, u_char *src, size_t *dlen, u_char *dst)
+encode_base32(size_t slen, u_char *src, size_t *dlen, u_char *dst,
+    ngx_flag_t padding, ngx_str_t *alphabet)
 {
-    static unsigned char basis32[] = "0123456789abcdefghijklmnopqrstuv";
+    unsigned char *basis32 = alphabet->data;
 
-    size_t len;
-    u_char *s;
-    u_char *d;
+    size_t       len;
+    u_char      *s;
+    u_char      *d;
 
     len = slen;
     s = src;
@@ -132,49 +132,60 @@ encode_base32(size_t slen, u_char *src, size_t *dlen, u_char *dst)
         *d++ = basis32[s[0] >> 3];
 
         if (len == 1) {
-            /* 剩余 1 个字节 */
+            /* 1 byte left */
             *d++ = basis32[(s[0] & 0x07) << 2];
 
-            /* 到结束为止补 6 个 = */
-            *d++ = '=';
-            *d++ = '=';
-            *d++ = '=';
-            *d++ = '=';
-            *d++ = '=';
+            /* pad six '='s to the end */
+            if (padding) {
+                *d++ = '=';
+                *d++ = '=';
+                *d++ = '=';
+                *d++ = '=';
+                *d++ = '=';
+            }
+
         } else {
             *d++ = basis32[((s[0] & 0x07) << 2) | (s[1] >> 6)];
             *d++ = basis32[(s[1] >> 1) & 0x1f];
 
             if (len == 2) {
-                /* 剩余 2 个字节 */
+                /* 2 bytes left */
                 *d++ = basis32[(s[1] & 1) << 4];
 
-                /* 到结束为止补 4 个 = */
-                *d++ = '=';
-                *d++ = '=';
-                *d++ = '=';
+                /* pad four '='s to the end */
+                if (padding) {
+                    *d++ = '=';
+                    *d++ = '=';
+                    *d++ = '=';
+                }
+
             } else {
                 *d++ = basis32[((s[1] & 1) << 4) | (s[2] >> 4)];
 
                 if (len == 3) {
-                    /* 剩余 3 个字节 */
+                    /* 3 bytes left */
                     *d++ = basis32[(s[2] & 0x0f) << 1];
 
-                    /* 到结束为止补 3 个 = */
-                    *d++ = '=';
-                    *d++ = '=';
+                    if (padding) {
+                        /* pad three '='s to the end */
+                        *d++ = '=';
+                        *d++ = '=';
+                    }
+
                 } else {
-                    /* 剩余 4 个字节 */
+                    /* 4 bytes left */
                     *d++ = basis32[((s[2] & 0x0f) << 1) | (s[3] >> 7)];
                     *d++ = basis32[(s[3] >> 2) & 0x1f];
                     *d++ = basis32[(s[3] & 0x03) << 3];
 
-                    /* 到结束为止补 1 个 = */
+                    /* pad one '=' to the end */
                 }
             }
         }
 
-        *d++ = '=';
+        if (padding) {
+            *d++ = '=';
+        }
     }
 
     *dlen = (size_t) (d - dst);
@@ -182,58 +193,9 @@ encode_base32(size_t slen, u_char *src, size_t *dlen, u_char *dst)
 
 
 static int
-decode_base32(size_t slen, u_char *src, size_t *dlen, u_char *dst)
+decode_base32(size_t slen, u_char *src, size_t *dlen, u_char *dst,
+    u_char *basis32)
 {
-    static unsigned char basis32[] = {
-        /* 0 - 15 */
-        77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77,
-
-        /* 16 - 31 */
-        77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77,
-
-        /* 32 - 47 */
-        77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77,
-
-        /* 48 - 63 */
-        0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 77, 77, 77, 77, 77, 77,
-
-        /* 64 - 79 */
-        77, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-
-        /* 80 - 95 */
-        25, 26, 27, 28, 29, 30, 31, 77, 77, 77, 77, 77, 77, 77, 77, 77,
-
-        /* 96 - 111 */
-        77, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-
-        /* 112 - 127 */
-        25, 26, 27, 28, 29, 30, 31, 77, 77, 77, 77, 77, 77, 77, 77, 77,
-
-        /* 128 - 143 */
-        77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77,
-
-        /* 144 - 159 */
-        77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77,
-
-        /* 160 - 175 */
-        77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77,
-
-        /* 176 - 191 */
-        77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77,
-
-        /* 192 - 207 */
-        77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77,
-
-        /* 208 - 223 */
-        77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77,
-
-        /* 224 - 239 */
-        77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77,
-
-        /* 240 - 255 */
-        77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77
-    };
-
     size_t                   len, mod;
     u_char                  *s = src;
     u_char                  *d = dst;
@@ -299,4 +261,3 @@ decode_base32(size_t slen, u_char *src, size_t *dlen, u_char *dst)
 
     return 0;
 }
-

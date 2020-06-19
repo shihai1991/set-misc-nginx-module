@@ -1,17 +1,20 @@
+#ifndef DDEBUG
 #define DDEBUG 0
+#endif
 #include "ddebug.h"
+
 #include <ndk.h>
 #include "ngx_http_set_escape_uri.h"
 #include "ngx_string.h"
 
 
-static uintptr_t ngx_escape_uri_patched(u_char *dst, u_char *src,
-        size_t size, ngx_uint_t type);
+static uintptr_t ngx_escape_uri_patched(u_char *dst, u_char *src, size_t size,
+    ngx_uint_t type);
 
 
 ngx_int_t
-ngx_http_set_misc_escape_uri(ngx_http_request_t *r,
-        ngx_str_t *res, ngx_http_variable_value_t *v)
+ngx_http_set_misc_escape_uri(ngx_http_request_t *r, ngx_str_t *res,
+    ngx_http_variable_value_t *v)
 {
     size_t           len;
     uintptr_t        escape;
@@ -48,7 +51,7 @@ ngx_http_set_misc_escape_uri(ngx_http_request_t *r,
     res->data = dst;
     res->len = len;
 
-    dd("after eacape:%.*s", res->len, res->data);
+    dd("after eacape:%.*s", (int) res->len, res->data);
 
     return NGX_OK;
 }
@@ -59,7 +62,7 @@ ngx_escape_uri_patched(u_char *dst, u_char *src, size_t size, ngx_uint_t type)
 {
     ngx_uint_t      n;
     uint32_t       *escape;
-    static u_char   hex[] = "0123456789abcdef";
+    static u_char   hex[] = "0123456789ABCDEF";
 
                     /* " ", "#", "%", "?", %00-%1F, %7F-%FF */
 

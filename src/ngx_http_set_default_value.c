@@ -1,11 +1,15 @@
+#ifndef DDEBUG
 #define DDEBUG 0
+#endif
 #include "ddebug.h"
+
 #include <ndk.h>
 #include "ngx_http_set_default_value.h"
 
+
 ngx_int_t
-ngx_http_set_misc_set_if_empty(ngx_http_request_t *r,
-        ngx_str_t *res, ngx_http_variable_value_t *v)
+ngx_http_set_misc_set_if_empty(ngx_http_request_t *r, ngx_str_t *res,
+    ngx_http_variable_value_t *v)
 {
     ngx_http_variable_value_t   *cur_v, *default_v;
 
@@ -35,7 +39,7 @@ ngx_http_set_if_empty(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     value = cf->args->elts;
 
     filter.type = NDK_SET_VAR_MULTI_VALUE;
-    filter.func = ngx_http_set_misc_set_if_empty;
+    filter.func = (void *) ngx_http_set_misc_set_if_empty;
     filter.size = 2;
     filter.data = NULL;
 

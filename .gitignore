@@ -19,7 +19,7 @@ update-readme
 test/Makefile
 test/blib
 test.sh
-t.sh
+all
 t/t.sh
 test/t/servroot/
 releng
@@ -56,3 +56,17 @@ src/hex.c
 src/hex.h
 src/hmac.c
 src/hmac.h
+src/rotate.[ch]
+analyze
+buildroot/
+src/module.h
+work/
+src/random.[ch]
+build1[0-9]
+nginx
+analyze
+src/rotate.[ch]
+*.plist
+Makefile
+src/base64url.[ch]
+src/expired.[ch]
